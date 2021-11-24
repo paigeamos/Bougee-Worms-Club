@@ -1,0 +1,319 @@
+---
+title: "Lightning talk"
+author: "Paige Amos"
+date: "10/11/2021"
+output: pdf_document
+---
+
+#### Load required libraries
+
+```{r}
+library(here)
+library(FSA) 
+library(fGarch)
+library(LambertW)
+library(patchwork)
+library(DHARMa)
+library(mgcv)
+library(fitdistrplus)
+library(goft)
+library(gamlss)
+library(tidyverse)
+```
+
+
+# Code for Preliminary Data
+
+```{r}
+tube_growth = read_csv(here("./data/tube-growth.csv"))
+knitr::kable(tube_growth, caption = "Tube growth rates of all marked worms in various treatments.")
+
+tank_conditions = read_csv(here("./data/tank-conditions.csv"))
+knitr::kable(tank_conditions, caption = "Tank conditions of all treatment tanks over course of experiment.")
+
+mortality = read_csv(here("./data/mortality.csv"))
+knitr::kable(mortality, caption = "Mortality of worms in all treatments.")
+```
+
+## Make scatterplot for growth of each worm
+```{r}
+clean_tube_growth <- tube_growth %>%
+  mutate(zone = as.factor(zone)) %>%
+  unite("replicate", tank:zone, remove = TRUE) %>%
+  dplyr::select(replicate, worm_id, treatment, growth_1, growth_2, growth_3) %>%
+  pivot_longer(!c(replicate, worm_id, treatment),
+               names_to = "timestep",
+               values_to = "growth") %>%
+  group_by(replicate) %>%
+  mutate(replicate_growth_1 = (sum(growth_1)/count(growth_1)))
+
+clean_tube_growth <- tube_growth %>%
+  dplyr::select(worm_id, treatment, growth_1, growth_2, growth_3) %>%
+  pivot_longer(!c(worm_id, treatment),
+               names_to = "timestep",
+               values_to = "growth")
+my_cols = c("growth_1" = "blue", "growth_2" = "red", "growth_3" = "purple")
+
+growthplot = ggplot(data = clean_tube_growth, aes(x = timestep, y = growth, fill = growth)) +
+  geom_boxplot(aes(colour = growth)) +
+  scale_colour_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols) +
+  theme_classic() +
+  ylab("Growth (mm)") +
+  xlab("Timesteps") +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA), 
+        text = element_text(size = 18))
+growthplot + scale_x_discrete(labels=c("growth_1" = "Timestep 1", "growth_2" = "Timestep 2","growth_3" = "Timestep 3"))
+```
+
+## Make a boxplot for final growth
+```{r}
+ggplot(tube_growth, aes(x = treatment, y = total_growth_DS)) +
+  geom_boxplot(alpha = 0.8)
+
+ggplot(tube_growth, aes(x = ))
+
+ggplot(snailed_it, aes(x = Exposure, y = Percent_survival, fill = Species)) + 
+    geom_point(aes(colour = Species), position = position_jitterdodge()) +
+    geom_boxplot(alpha = 0.8) +
+    scale_color_manual(values = my_cols) +
+    scale_fill_manual(values = my_cols)
+```
+
+
+## Make a scatterplot showing the treatments over the course of the experiment
+```{r}
+
+```
+
+# Stats
+
+## Total growth
+
+### Check for normality
+```{r}
+tube_growth <- tube_growth %>%
+  mutate(rootGrowth = sqrt(abs(total_growth_DS)))
+
+shapiro.test(tube_growth$total_growth_DS)
+
+shapiro.test(tube_growth$rootGrowth)
+```
+
+### histogram and qqplot
+```{r}
+hist(tube_growth$total_growth_DS)
+
+hist(tube_growth$rootGrowth)
+
+qqnorm(growth_total)
+qqline(growth_total)
+```
+
+### Finding distribution of data
+```{r}
+descdist(tube_growth$total_growth_DS)
+
+descdist(tube_growth$rootGrowth)
+```
+```{r}
+beta_test(tube_growth$total_growth_DS)
+ev_test(beasts2$danger)
+exp_test(beasts2$danger)
+gamma_test(beasts2$danger) #good fit
+lnorm_test(beasts2$danger)
+normal_test(beasts2$danger) #good fit
+weibull_test(beasts2$danger)
+```
+
+```{r}
+par(mfrow = c(2,2)) # sets our plot window to be 2 x 2 (instead of a single plot)
+mLG <- histDist(tube_growth$total_growth_DS, "LOGNO", density = T, main = "Lognormal")
+mNO <- histDist(tube_growth$total_growth_DS, "NO", density = T, main = "Normal")
+mWE <- histDist(tube_growth$total_growth_DS, "WEI", density = T, main = "Weibull")
+mGA <- histDist(tube_growth$total_growth_DS, "GA", density = T, main = "Gamma")
+mBE <- histDist(tube_growth$total_growth_DS, "BE", density = T, main = "Beta")
+```
+
+```{r}
+fit.log <- fitdist(log10(tube_growth$total_growth_DS), "norm")
+fit.gamma <- fitdist(tube_growth$total_growth_DS, "gamma")
+fit.norm <- fitdist(tube_growth$total_growth_DS, "norm")
+fit.weibull <- fitdist(tube_growth$total_growth_DS, "weibull")
+
+plot(fit.log)
+plot(fit.gamma)
+plot(fit.norm)
+plot(fit.weibull)
+```
+```{r}
+GAIC(mGA, mLG, mWE, mNO)
+```
+
+### Anova
+```{r}
+aov_total_growth <- aov(total_growth ~ treatment + (1|worm_id)+ (1|amt_cut_mm), data = tube-growth)
+```
+
+
+## Timestep growth
+
+### Check distributions of timestep growth
+```{r}
+# first timestep
+descdist(tube_growth$growth_1)
+
+# root transformed first timestep
+descdist(tube_growth$rootGrowth_1)
+
+
+# second timestep
+descdist(tube_growth$growth_2)
+
+# root transformed second timestep
+descdist(tube_growth$rootGrowth_2)
+
+
+# third timestep
+descdist(tube_growth$growth_3)
+
+# root transformed third timestep
+descdist(tube_growth$rootGrowth_3)
+```
+
+#### check for normality
+```{r}
+# first timestep
+tube_growth <- tube_growth %>%
+  mutate(rootGrowth_1 = sqrt(abs(growth_1)))
+
+shapiro.test(tube_growth$growth_1)
+
+shapiro.test(tube_growth$rootGrowth_1)
+
+# second timestep
+tube_growth <- tube_growth %>%
+  mutate(rootGrowth_2 = sqrt(abs(growth_2))) %>%
+  mutate(transform_2 = Gaussianize(growth_2))
+
+data_1 <- tube_growth %>%
+  dplyr::select(growth_1) %>%
+  mutate(growth_1 = as.numeric(growth_1))
+ 
+
+transform_1 <- Gaussianize(tube_growth$growth_1)
+# Error in IGMM(y, type = type) : is.numeric(y) is not TRUE
+
+shapiro.test(tube_growth$growth_2)
+
+shapiro.test(tube_growth$rootGrowth_2)
+
+# third timestep
+tube_growth <- tube_growth %>%
+  mutate(rootGrowth_3 = sqrt(abs(growth_3)))
+
+shapiro.test(tube_growth$growth_3)
+
+shapiro.test(tube_growth$rootGrowth_3)
+
+# fourth timestep
+tube_growth <- tube_growth %>%
+  mutate(rootGrowth_4 = sqrt(abs(growth_4)))
+
+shapiro.test(tube_growth$growth_4)
+
+shapiro.test(tube_growth$rootGrowth_4)
+
+```
+
+#### Testing how well certain distributions fit
+```{r}
+# first timestep
+exp_test(tube_growth$growth_1)
+
+#second timestep
+exp_test(tube_growth$growth_2)
+gamma_test(tube_growth$growth_2)
+
+# third timestep
+exp_test(tube_growth$growth_3)
+```
+
+
+#### histogram and qqplot
+```{r}
+# first timestep
+hist(tube_growth$growth_1)
+hist(tube_growth$rootGrowth_1)
+
+qqnorm(growth_ts_1)
+qqline(growth_ts_1)
+
+# second timestep
+hist(tube_growth$growth_2)
+hist(tube_growth$rootGrowth_2)
+
+qqnorm(growth_ts_2)
+qqline(growth_ts_2)
+
+# third timestep
+hist(tube_growth$growth_3)
+hist(tube_growth$rootGrowth_3)
+
+
+qqnorm(growth_ts_3)
+qqline(growth_ts_3)
+
+# fourth timestep
+hist(growth_ts_4)
+
+qqnorm(growth_ts_4)
+qqline(growth_ts_4)
+
+```
+
+#### Finding distribution of data
+```{r}
+# first timestep
+descdist(tube-growth$growth_1)
+
+# second timestep
+descdist(tube-growth$growth_2)
+
+# third timestep
+descdist(tube-growth$growth_3)
+
+# fourth timestep
+descdist(tube-growth$growth_4)
+
+```
+
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
