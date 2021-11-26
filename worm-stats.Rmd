@@ -4,27 +4,198 @@ author: "Paige Amos"
 date: "24/11/2021"
 output: pdf_document
 ---
+#### Load required libraries
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+library(here)
+library(FSA) 
+library(fGarch)
+library(LambertW)
+library(patchwork)
+library(DHARMa)
+library(mgcv)
+library(fitdistrplus)
+library(goft)
+library(gamlss)
+library(tidyverse)
 ```
 
-## R Markdown
+#### Load data
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
+tube_growth = read_csv(here("./data/tube-growth.csv"))
+knitr::kable(tube_growth, caption = "Tube growth rates of all marked worms in various treatments.")
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+tank_conditions = read_csv(here("./data/tank-conditions.csv"))
+knitr::kable(tank_conditions, caption = "Tank conditions of all treatment tanks over course of experiment.")
 
-```{r cars}
-summary(cars)
+mortality = read_csv(here("./data/mortality.csv"))
+knitr::kable(mortality, caption = "Mortality of worms in all treatments.")
 ```
 
-## Including Plots
+Plotting
+```{r}
+clean_tube_growth <- tube_growth %>%
+  mutate(zone = as.factor(zone)) %>%
+  unite("replicate", tank:zone, remove = TRUE) %>%
+  dplyr::select(replicate, worm_id, treatment, growth_1, growth_2, growth_3, growth_4, growth_5) %>%
+  pivot_longer(!c(replicate, worm_id, treatment),
+               names_to = "timestep",
+               values_to = "growth") %>%
+  group_by(replicate, treatment, timestep) %>%
+  summarize(replicate_growth = mean(growth))
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+ggplot(clean_tube_growth, aes(x = timestep, y = replicate_growth)) +
+  geom_point() +
+  xlab("Timesteps") +
+  ylab("Average Growth per Replicate (mm)") +
+  geom_smooth(method = "loess", span = (0.9)) +
+  theme_bw()
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+clean_tube_growth2 <- tube_growth %>%
+  dplyr::select(tank, worm_id, treatment, growth_1, growth_2, growth_3, growth_4, growth_5) %>%
+  pivot_longer(!c(tank, worm_id, treatment),
+               names_to = "timestep",
+               values_to = "growth") %>%
+  group_by(tank, treatment, timestep) %>%
+  summarize(tank_growth = mean(growth))
+
+
+
+
+ggplot(clean_tube_growth2, aes(x = timestep, y = tank_growth, colour = treatment)) +
+  geom_point() +
+  xlab("Timesteps") +
+  ylab("Average Growth per Treatment (mm)") +
+  geom_smooth(method = "loess", span = (0.9)) +
+  theme_bw()
+```
+
+
+```{r}
+library(reshape2)
+dan_data_length = tube_growth %>%
+  melt() %>%
+  filter(str_detect(variable, "length"))
+
+dan_data_growth = tube_growth %>%
+  melt() %>%
+  filter(str_detect(variable, "growth")) %>%
+  rename(Day = variable,
+         mm = value)
+
+
+ggplot(dan_data_growth, aes(x=Day, y = mm, fill = treatment)) +
+  geom_boxplot()
+```
+
+
+
+### Check distributions of timestep growth
+```{r}
+# first timestep
+descdist(tube_growth$growth_1)
+
+# second timestep
+descdist(tube_growth$growth_2)
+
+# third timestep
+descdist(tube_growth$growth_3)
+
+# fourth timestep
+descdist(tube_growth$growth_4)
+
+# fifth timestep
+descdist(tube_growth$growth_4)
+
+```
+
+### Checking normality and homogeneity
+```{r}
+# first timestep
+shapiro.test(tube_growth$growth_1)
+growth_1 <- tube_growth %>%
+  select(treatment, growth_1)
+bartlett.test(growth_1 ~ treatment, data = growth_1)
+
+# second timestep
+shapiro.test(tube_growth$growth_2)
+
+# third timestep
+shapiro.test(tube_growth$growth_3)
+
+# fourth timestep
+shapiro.test(tube_growth$growth_4)
+
+# fifth timestep
+shapiro.test(tube_growth$growth_4)
+```
+
+### Distribution fitting
+```{r}
+# first timestep
+fitDist(growth_1, data = tube_growth, type = "realAll", try.gamlss = T)
+# ex-gaussian
+
+# second timestep
+fitDist(growth_2, data = tube_growth, type = "realAll", try.gamlss = T)
+# Johnson SU original
+
+# third timestep
+fitDist(growth_3, data = tube_growth, type = "realAll", try.gamlss = T)
+# Sinh-Arcsinh
+
+# fourth timestep
+fitDist(growth_4, data = tube_growth, type = "realAll", try.gamlss = T)
+# Pareto Type 2
+
+# fifth timestep
+fitDist(growth_5, data = tube_growth, type = "realAll", try.gamlss = T)
+# Pareto Type 2
+
+```
+
+### Plotting the data
+```{r}
+ggplot(tube_growth, aes(x = treatment, y = total_growth)) +
+  geom_point()
+
+ggplot(tube_growth, aes(x = treatment, y = growth_1)) +
+  geom_point() +
+  theme_classic()
+  
+```
+
+### Trying stats
+```{r}
+tube_growth_v2 <- tube_growth %>%
+  mutate(worm_id = as.factor(worm_id))
+```
+
+First timestep
+```{r}
+growth_1_mod <- gamlss(growth_1 ~ treatment + amt_cut_mm + random(worm_id),
+                       family = exGAUS(),
+                       data = tube_growth_v2,
+                       method = CG(90),
+                       control = gamlss.control(n.cyc = 90))
+summary(growth_1_mod)
+```
+
+Second timestep
+```{r}
+growth_2_mod <- gamlss(growth_2 ~ treatment + amt_cut_mm + random(worm_id),
+                       family = )
+```
+
+
+## Look at if there is significance between timesteps for different treatments
+
+
+
+
+
+
+
